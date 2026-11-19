@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use super::protocol::{Backend, Bridge};
-use super::{bind_listener, publish_port_and_token};
+use super::{accept_loop, bind_listener, publish_port_and_token, unpublish_if_ours, Limits};
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
@@ -400,4 +400,107 @@ fn the_port_and_token_files_are_written_for_the_owner_only() {
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
+}
+
+/// A bridge served on an ephemeral port with `limits`; its address.
+async fn served(limits: Limits) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let (bridge, _) = bridge(FakeBackend::default());
+    tokio::spawn(accept_loop(listener, Arc::new(bridge), limits));
+    address
+}
+
+/// Send `line` and read one answer line; None when the server hangs up first.
+async fn exchange(stream: &mut tokio::net::TcpStream, line: &[u8]) -> Option<Value> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    stream.write_all(line).await.ok()?;
+    let mut answer = String::new();
+    let read = BufReader::new(stream).read_line(&mut answer).await.ok()?;
+    (read > 0).then(|| serde_json::from_str(&answer).unwrap())
+}
+
+const SMALL: Limits = Limits {
+    max_line: 64,
+    max_connections: 1,
+};
+
+#[tokio::test]
+async fn a_request_line_is_answered_over_tcp() {
+    let address = served(SMALL).await;
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+
+    let answer = exchange(&mut stream, b"{\"cmd\":\"hello\"}\n")
+        .await
+        .unwrap();
+
+    assert_eq!(answer["service"], json!("LTKBridge"));
+}
+
+#[tokio::test]
+async fn a_line_longer_than_the_limit_closes_the_connection() {
+    let address = served(SMALL).await;
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    let long = format!("{{\"cmd\":\"hello\",\"pad\":\"{}\"}}\n", "x".repeat(200));
+
+    assert_eq!(exchange(&mut stream, long.as_bytes()).await, None);
+}
+
+#[tokio::test]
+async fn connections_beyond_the_limit_are_turned_away() {
+    let address = served(SMALL).await;
+    let mut first = tokio::net::TcpStream::connect(address).await.unwrap();
+    assert!(exchange(&mut first, b"{\"cmd\":\"ping\"}\n")
+        .await
+        .is_some());
+
+    let mut second = tokio::net::TcpStream::connect(address).await.unwrap();
+    assert_eq!(exchange(&mut second, b"{\"cmd\":\"ping\"}\n").await, None);
+
+    drop(first);
+    // The slot frees once the first connection is gone.
+    let mut third = None;
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        if exchange(&mut stream, b"{\"cmd\":\"ping\"}\n")
+            .await
+            .is_some()
+        {
+            third = Some(stream);
+            break;
+        }
+    }
+    assert!(third.is_some(), "the freed slot was never reused");
+}
+
+#[test]
+fn the_bridge_folder_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let bridge_dir = dir.path().join("LTKBridge");
+
+    publish_port_and_token(&bridge_dir, 46325, TOKEN).unwrap();
+
+    let mode = fs_err::metadata(&bridge_dir).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+    assert!(!bridge_dir.join("token.tmp").exists());
+}
+
+#[test]
+fn quitting_removes_this_bridges_files_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let bridge_dir = dir.path().join("LTKBridge");
+    publish_port_and_token(&bridge_dir, 46325, TOKEN).unwrap();
+
+    // Another bridge published since: its files stay.
+    unpublish_if_ours(&bridge_dir, 46330);
+    assert!(bridge_dir.join("port.txt").exists());
+    assert!(bridge_dir.join("token.txt").exists());
+
+    unpublish_if_ours(&bridge_dir, 46325);
+    assert!(!bridge_dir.join("port.txt").exists());
+    assert!(!bridge_dir.join("token.txt").exists());
 }

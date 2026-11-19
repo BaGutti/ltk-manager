@@ -210,6 +210,9 @@ pub fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
     if let tauri::RunEvent::Exit = event {
         crate::patcher::shutdown_resources(app_handle);
 
+        #[cfg(target_os = "macos")]
+        crate::rose_bridge::unpublish_on_exit();
+
         let telemetry = crate::telemetry::state(app_handle);
         telemetry.handle().flush();
 
