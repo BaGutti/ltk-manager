@@ -5,6 +5,10 @@
   <h1>LTK Manager</h1>
 </div>
 
+> [!WARNING]
+> This branch is an **unofficial, experimental macOS build**, not a LeagueToolkit release. See
+> [MACOS-UNOFFICIAL.md](MACOS-UNOFFICIAL.md).
+
 LTK Manager is the frontier mod manager for League of Legends. Install custom skins, HUDs, maps, audio and much more.
 One of the main goals is to support mods so they work indefinitely without breaking between patches. It is the
 [League Toolkit](https://github.com/LeagueToolkit) team's successor to [cslol-manager](https://github.com/LeagueToolkit/cslol-manager).
