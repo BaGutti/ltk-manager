@@ -3,7 +3,10 @@
 .global _fopen_hook_shellcode_beg
 .global _fopen_hook_shellcode_end
 
-.set buffer_size, 0x200
+# 0x208, not 0x200: entry rsp is 8 mod 16 and the four pushes keep it there,
+# so an extra 8 bytes are needed for rsp to be 16-byte aligned at each
+# `call *(%rax)` into fopen, as the SysV x86-64 ABI requires.
+.set buffer_size, 0x208
 
 # %r12 = filename, %r13 = mode, %r14 = filename_len
 # The data region (fopen pointer + prefix) is reached through the absolute
