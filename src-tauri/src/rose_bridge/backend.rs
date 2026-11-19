@@ -109,7 +109,17 @@ impl Backend for TauriBackend {
     }
 
     fn stop_patcher(&self) -> Value {
-        envelope(commands::stop_patcher(self.app.state()))
+        let response = envelope(commands::stop_patcher(self.app.state()));
+        // The command only asks the session to stop. Rose edits the library
+        // right after, which LTK Manager refuses while the patcher still runs
+        // (PATCHER BUSY): answer once it has stopped, as the Windows bridge's
+        // callers expect.
+        if response.get("ok").and_then(Value::as_bool) == Some(true) {
+            if let Err(e) = self.app.state::<PatcherState>().wait_for_stop() {
+                tracing::warn!("Rose bridge: the patcher did not stop in time: {e}");
+            }
+        }
+        response
     }
 
     fn patcher_status(&self) -> Value {
