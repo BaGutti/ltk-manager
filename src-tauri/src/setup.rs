@@ -198,6 +198,10 @@ pub fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         crate::deep_link::handle_urls(&handle_clone, &event.urls());
     });
 
+    // Rose's bridge: last, since its commands read the states managed above.
+    #[cfg(target_os = "macos")]
+    crate::rose_bridge::spawn(app_handle.clone());
+
     Ok(())
 }
 

@@ -18,6 +18,8 @@ mod news;
 pub mod patcher;
 mod protocol;
 mod releases;
+#[cfg(target_os = "macos")]
+mod rose_bridge;
 mod setup;
 mod state;
 mod telemetry;

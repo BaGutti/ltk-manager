@@ -45,6 +45,25 @@ an account you can afford to lose. You use this build at your own risk.
 - The updater is off on macOS: upstream publishes no macOS release to update to.
 - Telemetry is off: the build carries no analytics key, so nothing is sent to LeagueToolkit.
 - `fopen_hook_x86_64.s` aligns the stack before calling `fopen`.
+- It serves the LTKBridge protocol for [Rose](https://github.com/Alban1911/Rose) (see below).
+
+## Rose bridge
+
+On Windows, Rose drives LTK Manager through a DLL injected into it. That DLL reaches the backend
+through WebView2's DevTools protocol, which macOS's WebView does not have. This build serves the
+same bridge natively instead (`src-tauri/src/rose_bridge/`), so Rose's unchanged
+`injection/tools/bridge.py` works against it.
+
+- It listens on `127.0.0.1` only, on the first free port in 46321-46340, or on `LTK_API_PORT` if
+  that is set.
+- It writes the port and a fresh random token to `port.txt` and `token.txt` in
+  `~/Library/Application Support/LTKBridge/`. Both files are readable by your user only.
+- Every command except `hello` and `ping` needs the token.
+- Commands: `hello`, `ping`, `status`, `list`, `import` (`path` or `data_b64`), `toggle`,
+  `uninstall`, `start_patcher`, `stop_patcher`, `patcher_status`, `check_mod_health`,
+  `repair_mod`, `health_check_off`, `kill`.
+- Each command runs the same backend command the UI uses, so the same checks apply. For example,
+  the library cannot change while the patcher runs.
 
 ## Build
 
