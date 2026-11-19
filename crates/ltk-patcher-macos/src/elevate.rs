@@ -136,7 +136,7 @@ fn accept_until(
     let deadline = Instant::now() + timeout;
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return Ok(stream),
+            Ok((stream, _)) => return blocking(stream),
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // If osascript already returned and no worker connected, the
                 // authorization was declined or the worker could not start.
@@ -144,7 +144,7 @@ fn accept_until(
                     // Give a just-connected worker a brief chance to land first.
                     std::thread::sleep(Duration::from_millis(100));
                     if let Ok((stream, _)) = listener.accept() {
-                        return Ok(stream);
+                        return blocking(stream);
                     }
                     return Err(
                         "administrator authorization was declined or the elevated helper could not start"
@@ -159,6 +159,15 @@ fn accept_until(
             Err(e) => return Err(e.to_string()),
         }
     }
+}
+
+/// The worker connection in blocking mode. On macOS a socket accepted from a
+/// non-blocking listener inherits `O_NONBLOCK`: its first read then fails with
+/// `WouldBlock` before the worker has written, and the relay would stop
+/// forwarding the worker's output.
+fn blocking(stream: UnixStream) -> Result<UnixStream, String> {
+    stream.set_nonblocking(false).map_err(|e| e.to_string())?;
+    Ok(stream)
 }
 
 /// Launch a root copy of ourselves that connects back to `sock_path`, prompting
@@ -203,6 +212,40 @@ pub fn worker(sock_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_accepted_worker_connection_waits_for_its_lines() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        let dir = std::env::temp_dir().join(format!("ltk-relay-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("host.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        // As the relay does, so the password wait can time out
+        listener.set_nonblocking(true).unwrap();
+        let auth = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(5));
+            String::new()
+        });
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            let mut stream = UnixStream::connect(&worker_path).unwrap();
+            // The worker's first line comes a moment after it connects
+            std::thread::sleep(Duration::from_millis(200));
+            stream.write_all(b"ok 0.1 loglevel set\n").unwrap();
+        });
+
+        let mut stream = accept_until(&listener, Duration::from_secs(5), &auth).unwrap();
+        let mut buf = [0u8; 64];
+        let read = stream.read(&mut buf);
+
+        worker.join().unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        let n = read.expect("a read on the worker connection waits for its line");
+        assert_eq!(&buf[..n], b"ok 0.1 loglevel set\n");
+    }
 
     #[test]
     fn shell_quoting_wraps_and_escapes() {
