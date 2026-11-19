@@ -284,6 +284,38 @@ pub(crate) fn start_patcher_inner(
     )
 }
 
+/// Start the persistent injection host ahead of a session, so the elevation
+/// prompt it shows as it starts comes now rather than as a game loads.
+///
+/// The next [`start_patcher_inner`] reuses it (see `ensure_started`). Does
+/// nothing while a session runs or when a live host with the elevation the
+/// next session needs is already there. Returns whether it started one.
+#[cfg(target_os = "macos")]
+pub(crate) fn prewarm_host(app_handle: &AppHandle) -> Result<bool, String> {
+    if app_handle.state::<PatcherState>().is_running() {
+        return Ok(false);
+    }
+    let elevate =
+        ltk_manager_core::patcher::should_elevate(&app_handle.state::<SettingsState>().config());
+    let injector_exe =
+        resolve_resource(app_handle, INJECTOR_EXE_NAME).map_err(|e| e.to_string())?;
+
+    let host_state = app_handle.state::<PatcherHostState>();
+    let mut slot = host_state.handle().lock();
+    if let Some(host) = slot.as_mut() {
+        if host.is_alive() && host.elevated() == elevate {
+            return Ok(false);
+        }
+    }
+    if let Some(mut stale) = slot.take() {
+        stale.shutdown();
+    }
+    let host = ltk_manager_core::patcher::host::PatcherHost::spawn(&injector_exe, elevate)
+        .map_err(|e| e.to_string())?;
+    *slot = Some(host);
+    Ok(true)
+}
+
 /// Stop the running patcher.
 #[tauri::command]
 pub fn stop_patcher(state: State<PatcherState>) -> IpcResult<()> {

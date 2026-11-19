@@ -13,6 +13,7 @@ struct FakeBackend {
     calls: Mutex<Vec<String>>,
     mods: Value,
     patcher_running: bool,
+    prepared: std::sync::atomic::AtomicUsize,
 }
 
 impl FakeBackend {
@@ -79,6 +80,16 @@ impl Backend for FakeBackend {
     }
     fn quit(&self) {
         self.record("quit".into());
+    }
+    fn prepare_patcher(&self) {
+        self.prepared
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl FakeBackend {
+    fn prepared(&self) -> usize {
+        self.prepared.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -503,4 +514,22 @@ fn quitting_removes_this_bridges_files_only() {
     unpublish_if_ours(&bridge_dir, 46325);
     assert!(!bridge_dir.join("port.txt").exists());
     assert!(!bridge_dir.join("token.txt").exists());
+}
+
+#[test]
+fn the_patcher_is_prepared_once_when_rose_first_connects() {
+    let (bridge, backend) = bridge(FakeBackend::with_mods());
+
+    send(&bridge, json!({"cmd": "hello"}));
+    send(&bridge, json!({"cmd": "ping"}));
+    send(&bridge, json!({"cmd": "list", "token": "wrong"}));
+    assert_eq!(
+        backend.prepared(),
+        0,
+        "only an authorized client prepares it"
+    );
+
+    send(&bridge, authed(json!({"cmd": "list"})));
+    send(&bridge, authed(json!({"cmd": "patcher_status"})));
+    assert_eq!(backend.prepared(), 1);
 }

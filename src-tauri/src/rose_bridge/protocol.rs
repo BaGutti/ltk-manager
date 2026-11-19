@@ -8,6 +8,7 @@
 //! as `response`.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -29,6 +30,10 @@ pub(crate) trait Backend: Send + Sync {
     fn repair_mod(&self, mod_id: &str) -> Value;
     /// Quit the app shortly after the answer has gone out.
     fn quit(&self);
+    /// Get the patcher ready ahead of a game, without blocking: on macOS its
+    /// host asks for the administrator password as it starts, which must be
+    /// answered before the game loads its files.
+    fn prepare_patcher(&self);
 }
 
 pub(crate) struct Bridge {
@@ -36,6 +41,7 @@ pub(crate) struct Bridge {
     port: u16,
     pid: u32,
     backend: Arc<dyn Backend>,
+    prepared: AtomicBool,
 }
 
 const SERVICE: &str = "LTKBridge";
@@ -49,6 +55,7 @@ impl Bridge {
             port,
             pid,
             backend,
+            prepared: AtomicBool::new(false),
         }
     }
 
@@ -73,7 +80,14 @@ impl Bridge {
             }),
             "ping" => json!({"ok": true, "pong": now_millis()}),
             _ if !self.authorized(&request) => error(UNAUTHORIZED),
-            _ => self.handle_authorized(cmd, &request),
+            _ => {
+                // Rose's first command opens its session: the password prompt
+                // shows now, during champion select, not as the game loads
+                if !self.prepared.swap(true, Ordering::SeqCst) {
+                    self.backend.prepare_patcher();
+                }
+                self.handle_authorized(cmd, &request)
+            }
         }
     }
 

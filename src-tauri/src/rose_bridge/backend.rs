@@ -130,6 +130,15 @@ impl Backend for TauriBackend {
         )))
     }
 
+    fn prepare_patcher(&self) {
+        let app = self.app.clone();
+        std::thread::spawn(move || match crate::commands::prewarm_host(&app) {
+            Ok(true) => tracing::info!("Rose bridge: started the patcher host ahead of the game"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!("Rose bridge: could not start the patcher host early: {e}"),
+        });
+    }
+
     fn quit(&self) {
         let app = self.app.clone();
         let dir = self.bridge_dir.clone();
