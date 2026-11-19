@@ -134,6 +134,11 @@ impl Progress {
 ///
 /// When the endpoint cannot be reached or answers with a manifest the updater rejects.
 pub async fn check(app: &AppHandle) -> AppResult<Option<PendingUpdate>> {
+    // The unofficial macOS build has no update channel: the configured endpoint
+    // is upstream's, which publishes no macOS release.
+    if cfg!(target_os = "macos") {
+        return Ok(None);
+    }
     let found = app
         .updater()
         .map_err(updater_error)?

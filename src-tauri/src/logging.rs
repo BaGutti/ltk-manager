@@ -149,6 +149,11 @@ pub fn cleanup_old_logs(log_dir: &Path, max_age_days: u64) {
 }
 
 pub(crate) fn default_log_dir() -> Option<PathBuf> {
+    // Must match the bundle identifier: tauri.macos.conf.json overrides it for
+    // the unofficial macOS build, so its logs stay apart from the official app's.
+    #[cfg(target_os = "macos")]
+    const IDENTIFIER: &str = "io.github.bagutti.ltk-manager-macos";
+    #[cfg(not(target_os = "macos"))]
     const IDENTIFIER: &str = "dev.leaguetoolkit.manager";
 
     #[cfg(target_os = "windows")]

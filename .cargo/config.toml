@@ -1,2 +1,5 @@
 [env]
 TS_RS_EXPORT_DIR = { value = "src/lib/bindings/", relative = true }
+# Build libwebp from source and link it statically, so the macOS app does not
+# depend on a Homebrew libwebp that users will not have.
+LIBWEBP_SYS_STATIC = "1"

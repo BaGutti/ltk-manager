@@ -1,7 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LTK Manager Unofficial",
+  "identifier": "io.github.bagutti.ltk-manager-macos",
   "bundle": {
     "targets": ["app", "dmg"],
+    "resources": {
+      "resources/**/*": null,
+      "resources/ltk_patcher_host": "ltk_patcher_host"
+    },
     "createUpdaterArtifacts": false
   }
 }
